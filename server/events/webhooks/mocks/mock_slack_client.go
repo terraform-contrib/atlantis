@@ -7,6 +7,7 @@ import (
 	pegomock "github.com/petergtz/pegomock/v4"
 	webhooks "github.com/runatlantis/atlantis/server/events/webhooks"
 	"reflect"
+	template "text/template"
 	"time"
 )
 
@@ -40,11 +41,11 @@ func (mock *MockSlackClient) AuthTest() error {
 	return _ret0
 }
 
-func (mock *MockSlackClient) PostDriftMessage(channel string, driftResult webhooks.DriftResult) error {
+func (mock *MockSlackClient) PostDriftMessage(channel string, driftResult webhooks.DriftResult, tmpl *template.Template) error {
 	if mock == nil {
 		panic("mock must not be nil. Use myMock := NewMockSlackClient().")
 	}
-	_params := []pegomock.Param{channel, driftResult}
+	_params := []pegomock.Param{channel, driftResult, tmpl}
 	_result := pegomock.GetGenericMockFrom(mock).Invoke("PostDriftMessage", _params, []reflect.Type{reflect.TypeOf((*error)(nil)).Elem()})
 	var _ret0 error
 	if len(_result) != 0 {
@@ -139,8 +140,8 @@ func (c *MockSlackClient_AuthTest_OngoingVerification) GetCapturedArguments() {
 func (c *MockSlackClient_AuthTest_OngoingVerification) GetAllCapturedArguments() {
 }
 
-func (verifier *VerifierMockSlackClient) PostDriftMessage(channel string, driftResult webhooks.DriftResult) *MockSlackClient_PostDriftMessage_OngoingVerification {
-	_params := []pegomock.Param{channel, driftResult}
+func (verifier *VerifierMockSlackClient) PostDriftMessage(channel string, driftResult webhooks.DriftResult, tmpl *template.Template) *MockSlackClient_PostDriftMessage_OngoingVerification {
+	_params := []pegomock.Param{channel, driftResult, tmpl}
 	methodInvocations := pegomock.GetGenericMockFrom(verifier.mock).Verify(verifier.inOrderContext, verifier.invocationCountMatcher, "PostDriftMessage", _params, verifier.timeout)
 	return &MockSlackClient_PostDriftMessage_OngoingVerification{mock: verifier.mock, methodInvocations: methodInvocations}
 }
@@ -150,12 +151,12 @@ type MockSlackClient_PostDriftMessage_OngoingVerification struct {
 	methodInvocations []pegomock.MethodInvocation
 }
 
-func (c *MockSlackClient_PostDriftMessage_OngoingVerification) GetCapturedArguments() (string, webhooks.DriftResult) {
-	channel, driftResult := c.GetAllCapturedArguments()
-	return channel[len(channel)-1], driftResult[len(driftResult)-1]
+func (c *MockSlackClient_PostDriftMessage_OngoingVerification) GetCapturedArguments() (string, webhooks.DriftResult, *template.Template) {
+	channel, driftResult, tmpl := c.GetAllCapturedArguments()
+	return channel[len(channel)-1], driftResult[len(driftResult)-1], tmpl[len(tmpl)-1]
 }
 
-func (c *MockSlackClient_PostDriftMessage_OngoingVerification) GetAllCapturedArguments() (_param0 []string, _param1 []webhooks.DriftResult) {
+func (c *MockSlackClient_PostDriftMessage_OngoingVerification) GetAllCapturedArguments() (_param0 []string, _param1 []webhooks.DriftResult, _param2 []*template.Template) {
 	_params := pegomock.GetGenericMockFrom(c.mock).GetInvocationParams(c.methodInvocations)
 	if len(_params) > 0 {
 		if len(_params) > 0 {
@@ -168,6 +169,12 @@ func (c *MockSlackClient_PostDriftMessage_OngoingVerification) GetAllCapturedArg
 			_param1 = make([]webhooks.DriftResult, len(c.methodInvocations))
 			for u, param := range _params[1] {
 				_param1[u] = param.(webhooks.DriftResult)
+			}
+		}
+		if len(_params) > 2 {
+			_param2 = make([]*template.Template, len(c.methodInvocations))
+			for u, param := range _params[2] {
+				_param2[u] = param.(*template.Template)
 			}
 		}
 	}
