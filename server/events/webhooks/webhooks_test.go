@@ -146,6 +146,32 @@ func TestNewWebhooksManager_UnsupportedKind(t *testing.T) {
 	Equals(t, "\"kind: badkind\" not supported. Only \"kind: slack\" and \"kind: http\" are supported right now", err.Error())
 }
 
+func TestNewWebhooksManager_ApplyTemplateUnsupported(t *testing.T) {
+	t.Log("When an apply webhook sets a template, an error is returned instead of ignoring it")
+	RegisterMockTestingT(t)
+	clients := validClients()
+	configs := validConfigs()
+	configs[0].Template = "Applied {{ .Workspace }}"
+	_, err := webhooks.NewMultiWebhookSender(configs, clients)
+	Assert(t, err != nil, "expected error")
+	Equals(t, "\"template\" is only supported for \"event: drift\" webhooks", err.Error())
+}
+
+func TestNewWebhooksManager_DriftTemplateLeftToDriftSender(t *testing.T) {
+	RegisterMockTestingT(t)
+	clients := validClients()
+	configs := []webhooks.Config{{
+		Event:    webhooks.DriftEvent,
+		Kind:     webhooks.SlackKind,
+		Channel:  "drift-alerts",
+		Template: "Drift in {{ .Repository }}",
+	}}
+
+	manager, err := webhooks.NewMultiWebhookSender(configs, clients)
+	Ok(t, err)
+	Equals(t, 0, len(manager.Webhooks)) // nolint: staticcheck
+}
+
 func TestNewWebhooksManager_NoConfigSuccess(t *testing.T) {
 	t.Log("When there are no configs, function should succeed")
 	t.Log("passing any client should succeed")

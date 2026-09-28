@@ -5,6 +5,7 @@ package webhooks_test
 
 import (
 	"testing"
+	"text/template"
 
 	. "github.com/petergtz/pegomock/v4"
 	"github.com/runatlantis/atlantis/server/events/webhooks"
@@ -31,7 +32,7 @@ func TestDriftSlackWebhook_Send(t *testing.T) {
 	}
 
 	_ = hook.Send(logging.NewNoopLogger(t), result)
-	client.VerifyWasCalledOnce().PostDriftMessage(channel, result)
+	client.VerifyWasCalledOnce().PostDriftMessage(channel, result, nil)
 }
 
 func TestDriftSlackWebhook_SendNoDrift(t *testing.T) {
@@ -53,5 +54,21 @@ func TestDriftSlackWebhook_SendNoDrift(t *testing.T) {
 
 	err := hook.Send(logging.NewNoopLogger(t), result)
 	Ok(t, err)
-	client.VerifyWasCalledOnce().PostDriftMessage(channel, result)
+	client.VerifyWasCalledOnce().PostDriftMessage(channel, result, nil)
+}
+
+func TestDriftSlackWebhook_SendWithTemplate(t *testing.T) {
+	RegisterMockTestingT(t)
+	client := mocks.NewMockSlackClient()
+	channel := "drift-alerts"
+	tmpl := template.Must(template.New("drift").Parse("Drift in {{ .Repository }}"))
+	hook := webhooks.DriftSlackWebhook{
+		Client:   client,
+		Channel:  channel,
+		Template: tmpl,
+	}
+
+	err := hook.Send(logging.NewNoopLogger(t), driftResult)
+	Ok(t, err)
+	client.VerifyWasCalledOnce().PostDriftMessage(channel, driftResult, tmpl)
 }

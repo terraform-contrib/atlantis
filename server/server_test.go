@@ -26,6 +26,7 @@ import (
 	"github.com/runatlantis/atlantis/server/core/locking"
 	lockMocks "github.com/runatlantis/atlantis/server/core/locking/mocks"
 	"github.com/runatlantis/atlantis/server/events/models"
+	"github.com/runatlantis/atlantis/server/events/webhooks"
 	"github.com/runatlantis/atlantis/server/jobs"
 	"github.com/runatlantis/atlantis/server/logging"
 	. "github.com/runatlantis/atlantis/testing"
@@ -78,6 +79,47 @@ func TestNewServer_EnableDriftDetectionWiresServices(t *testing.T) {
 	Assert(t, s.APIController.RemediationService != nil, "expected remediation service to be configured")
 	Assert(t, !s.APIController.EnableDriftRemediation, "expected drift remediation apply to require explicit opt-in")
 	Assert(t, s.APIController.DriftWebhookSender != nil, "expected drift webhook sender to be configured")
+}
+
+func TestNewServer_DriftWebhookTemplate(t *testing.T) {
+	driftWebhookServer := func(template string) (*server.Server, error) {
+		return server.NewServer(
+			server.UserConfig{
+				DataDir:              t.TempDir(),
+				AtlantisURL:          testAtlantisUrl + "/",
+				LockingDBType:        testLockingDBType,
+				GithubHostname:       testGitHubHostName,
+				GithubUser:           testGitHubUser,
+				APISecret:            "token",
+				EnableDriftDetection: true,
+				SlackToken:           "xoxb-test",
+				Webhooks: []server.WebhookConfig{{
+					Event:    webhooks.DriftEvent,
+					Kind:     webhooks.SlackKind,
+					Channel:  "drift-alerts",
+					Template: template,
+				}},
+			}, server.Config{
+				AtlantisVersion: testAtlantisVersion,
+			},
+		)
+	}
+
+	t.Run("valid template", func(t *testing.T) {
+		s, err := driftWebhookServer("[prod] drift in {{ .Repository }}")
+		Ok(t, err)
+		Equals(t, testAtlantisUrl, s.APIController.AtlantisURL)
+		Equals(t, 1, len(s.APIController.DriftWebhookSender.Webhooks))
+		hook, ok := s.APIController.DriftWebhookSender.Webhooks[0].(*webhooks.DriftSlackWebhook)
+		Assert(t, ok, "expected a slack drift webhook, got %T", s.APIController.DriftWebhookSender.Webhooks[0])
+		Assert(t, hook.Template != nil, "expected the drift webhook template to be configured")
+	})
+
+	t.Run("invalid template fails startup", func(t *testing.T) {
+		_, err := driftWebhookServer("drift in {{ .Repo }}")
+		ErrContains(t, "initializing drift webhooks: parsing \"template\" for drift webhook to channel \"drift-alerts\"", err)
+		ErrContains(t, "can't evaluate field Repo", err)
+	})
 }
 
 func TestNewServer_EnableDriftRemediationWiresApplyOptIn(t *testing.T) {

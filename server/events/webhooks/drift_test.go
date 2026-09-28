@@ -16,6 +16,7 @@ import (
 )
 
 var driftResult = webhooks.DriftResult{
+	AtlantisURL:       "https://atlantis.example.com",
 	Repository:        "owner/repo",
 	Ref:               "main",
 	DetectionID:       "det-123",
@@ -148,6 +149,81 @@ func TestNewDriftWebhookSender_SlackNoChannel(t *testing.T) {
 	_, err := webhooks.NewDriftWebhookSender(configs, clients)
 	Assert(t, err != nil, "expected error when channel is empty")
 	ErrContains(t, "channel", err)
+}
+
+func TestNewDriftWebhookSender_SlackTemplate(t *testing.T) {
+	RegisterMockTestingT(t)
+	slackClient := mocks.NewMockSlackClient()
+	When(slackClient.TokenIsSet()).ThenReturn(true)
+
+	configs := []webhooks.Config{{
+		Event:    webhooks.DriftEvent,
+		Kind:     webhooks.SlackKind,
+		Channel:  "drift-alerts",
+		Template: `{{ if .ProjectsWithDrift }}[prod] drift in {{ .Repository | upper }}{{ end }}`,
+	}}
+	sender, err := webhooks.NewDriftWebhookSender(configs, webhooks.Clients{Slack: slackClient})
+	Ok(t, err)
+	Equals(t, 1, len(sender.Webhooks))
+	hook, ok := sender.Webhooks[0].(*webhooks.DriftSlackWebhook)
+	Assert(t, ok, "expected a slack drift webhook, got %T", sender.Webhooks[0])
+	Assert(t, hook.Template != nil, "expected the template to be parsed")
+}
+
+func TestNewDriftWebhookSender_SlackTemplateErrors(t *testing.T) {
+	cases := []struct {
+		description string
+		template    string
+		expErrs     []string
+	}{
+		{
+			description: "syntax error",
+			template:    "{{ .Repository ",
+			expErrs:     []string{`parsing "template" for drift webhook to channel "drift-alerts": `, "unclosed action"},
+		},
+		{
+			description: "unknown function",
+			template:    "{{ .Repository | nosuchfunc }}",
+			expErrs:     []string{`function "nosuchfunc" not defined`},
+		},
+		{
+			// Fields are only resolved when the template runs, so a typo would
+			// otherwise go unnoticed until drift is detected.
+			description: "unknown field",
+			template:    "{{ range .Projects }}{{ .Project }}{{ end }}",
+			expErrs:     []string{"rendering a sample drift result: ", "can't evaluate field Project in type webhooks.DriftProjectResult"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.description, func(t *testing.T) {
+			RegisterMockTestingT(t)
+			slackClient := mocks.NewMockSlackClient()
+			When(slackClient.TokenIsSet()).ThenReturn(true)
+
+			configs := []webhooks.Config{{
+				Event:    webhooks.DriftEvent,
+				Kind:     webhooks.SlackKind,
+				Channel:  "drift-alerts",
+				Template: c.template,
+			}}
+			_, err := webhooks.NewDriftWebhookSender(configs, webhooks.Clients{Slack: slackClient})
+			for _, expErr := range c.expErrs {
+				ErrContains(t, expErr, err)
+			}
+		})
+	}
+}
+
+func TestNewDriftWebhookSender_HttpTemplateUnsupported(t *testing.T) {
+	configs := []webhooks.Config{
+		{Event: webhooks.DriftEvent, Kind: webhooks.HttpKind, URL: "http://example.com/webhook", Template: "{{ .Repository }}"},
+	}
+	clients := webhooks.Clients{
+		Http: &webhooks.HttpClient{Client: http.DefaultClient},
+	}
+	_, err := webhooks.NewDriftWebhookSender(configs, clients)
+	Assert(t, err != nil, "expected error when a template is set on an http drift webhook")
+	Equals(t, "\"template\" is only supported for drift webhooks of \"kind: slack\"", err.Error())
 }
 
 func TestNewDriftWebhookSender_HttpSuccess(t *testing.T) {

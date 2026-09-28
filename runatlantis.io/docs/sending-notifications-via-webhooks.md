@@ -193,14 +193,74 @@ When drift detection completes successfully, the Slack message includes:
 
 * **Color**: Red if drift was found, green if no drift
 * **Text**: "Drift detected in owner/repo" or "No drift in owner/repo"
-* **Fields**: Repository, Ref, Projects with drift (count), Detection ID
+* **Fields**: Atlantis, Repository, Ref, Projects with drift (count), Detection ID. The Atlantis field is the server's [`--atlantis-url`](server-configuration.md#atlantis-url), so you can tell which Atlantis instance sent the message.
+* **Drifted projects**: One line for each project with drift, with the project name, directory, workspace and plan summary. Up to 20 projects are listed.
+
+For example, the drifted projects field contains lines like these:
+
+```text
+• project: `vpc` dir: `modules/vpc` workspace: `production` — Plan: 1 to add, 2 to change, 0 to destroy.
+• dir: `modules/iam` workspace: `default` — Note: Objects have changed outside of Terraform. Plan: 0 to add, 1 to change, 0 to destroy.
+```
+
+### Customizing the Slack drift message
+
+To replace the default message, set `template` on a drift webhook of `kind: slack`. The template uses [Go template](https://pkg.go.dev/text/template) syntax with the [Sprig functions](https://masterminds.github.io/sprig/), and its output is sent as [Slack mrkdwn](https://api.slack.com/reference/surfaces/formatting). The message keeps the red or green color.
+
+For example, this template labels messages from a production Atlantis and skips detection runs that found no drift:
+
+```yaml
+webhooks:
+- event: drift
+  kind: slack
+  channel: drift-alerts
+  template: |
+    {{- if .ProjectsWithDrift -}}
+    :rotating_light: *[production]* Drift detected in `{{ .Repository }}` (ref `{{ .Ref }}`) by {{ .AtlantisURL }}
+    {{- range .Projects }}{{ if .HasDrift }}
+    • {{ if .ProjectName }}project: `{{ .ProjectName }}` {{ end }}dir: `{{ .Path }}` workspace: `{{ .Workspace }}` — {{ .Summary }}
+    {{- end }}{{ end }}
+    {{- end -}}
+```
+
+The template is rendered with these fields:
+
+| Field | Description |
+| --- | --- |
+| `.AtlantisURL` | URL of the Atlantis server that ran the detection ([`--atlantis-url`](server-configuration.md#atlantis-url)) |
+| `.Repository` | Full repository name, for example `owner/repo` |
+| `.Ref` | Git reference that was checked |
+| `.DetectionID` | ID of the detection run |
+| `.ProjectsWithDrift` | Number of projects with drift |
+| `.TotalProjects` | Number of projects checked |
+| `.Projects` | The projects that were checked |
+
+Each item in `.Projects` has these fields:
+
+| Field | Description |
+| --- | --- |
+| `.ProjectName` | Project name from the repo configuration. Empty if the project has no name. |
+| `.Path` | Project directory, relative to the repository root |
+| `.Workspace` | Terraform workspace |
+| `.HasDrift` | Whether the project has drift |
+| `.ChangesOutside` | Whether Terraform detected objects that changed outside of Terraform |
+| `.ToAdd`, `.ToChange`, `.ToDestroy`, `.ToImport`, `.ToForget` | Resource counts from the plan |
+| `.Summary` | One-line plan summary, for example `Plan: 1 to add, 2 to change, 0 to destroy.` |
+
+Things to know about templates:
+
+* Values from the detection result are escaped for Slack, so they can't add links or mentions. Text in the template itself is sent as is, so it can include links such as `<https://example.com/runbook|runbook>` and mentions such as `<!here>`.
+* If the template renders only whitespace, no message is sent. The example above uses this to skip detection runs without drift.
+* Atlantis renders the template with a sample result when it starts, and doesn't start if the template is invalid, for example because it uses a field that doesn't exist.
+* `template` is only supported for drift webhooks of `kind: slack`.
 
 ### HTTP drift webhook payload
 
-The HTTP webhook sends a POST request with the following JSON payload:
+The HTTP webhook sends a POST request with the following JSON payload. `atlantis_url` is the server's [`--atlantis-url`](server-configuration.md#atlantis-url), which identifies the Atlantis instance that sent the webhook.
 
 ```json
 {
+  "atlantis_url": "https://atlantis.example.com",
   "repository": "octocat/Hello-World",
   "ref": "main",
   "detection_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -212,6 +272,7 @@ The HTTP webhook sends a POST request with the following JSON payload:
       "path": "modules/vpc",
       "workspace": "production",
       "has_drift": true,
+      "changes_outside": false,
       "to_add": 1,
       "to_change": 2,
       "to_destroy": 0,
@@ -224,6 +285,7 @@ The HTTP webhook sends a POST request with the following JSON payload:
       "path": "modules/ec2",
       "workspace": "production",
       "has_drift": false,
+      "changes_outside": false,
       "to_add": 0,
       "to_change": 0,
       "to_destroy": 0,

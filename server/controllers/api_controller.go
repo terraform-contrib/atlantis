@@ -78,6 +78,9 @@ type APIController struct {
 	// DriftWebhookSender sends webhook notifications when drift is detected.
 	// Nil when no drift webhooks are configured.
 	DriftWebhookSender *webhooks.DriftWebhookSender
+	// AtlantisURL is this server's --atlantis-url. It is included in drift
+	// webhook notifications to identify which Atlantis instance sent them.
+	AtlantisURL string
 	// SilenceVCSStatusNoProjects is whether API should set commit status if no projects are found
 	SilenceVCSStatusNoProjects bool
 
@@ -2248,7 +2251,7 @@ func (a *APIController) DetectDrift(w http.ResponseWriter, r *http.Request) {
 	// Send drift webhook notifications for completed detections, including
 	// no-drift heartbeat results.
 	if a.DriftWebhookSender != nil && !driftDetectionHasErrors(detectionResult) {
-		webhookResult := convertToDriftWebhookResult(detectionResult, normalizedRef)
+		webhookResult := convertToDriftWebhookResult(detectionResult, normalizedRef, a.AtlantisURL)
 		if err := a.DriftWebhookSender.Send(a.Logger, webhookResult); err != nil {
 			a.Logger.Warn("failed to send drift webhook: %v", err)
 		}
@@ -2265,21 +2268,22 @@ func (a *APIController) DetectDrift(w http.ResponseWriter, r *http.Request) {
 }
 
 // convertToDriftWebhookResult converts a DriftDetectionResult to a webhook DriftResult.
-func convertToDriftWebhookResult(dr *models.DriftDetectionResult, requestRef string) webhooks.DriftResult {
+func convertToDriftWebhookResult(dr *models.DriftDetectionResult, requestRef, atlantisURL string) webhooks.DriftResult {
 	projects := make([]webhooks.DriftProjectResult, 0, len(dr.Projects))
 	for _, p := range dr.Projects {
 		projects = append(projects, webhooks.DriftProjectResult{
-			ProjectName: p.ProjectName,
-			Path:        p.Path,
-			Workspace:   p.Workspace,
-			HasDrift:    p.Drift.HasDrift,
-			ToAdd:       p.Drift.ToAdd,
-			ToChange:    p.Drift.ToChange,
-			ToDestroy:   p.Drift.ToDestroy,
-			ToImport:    p.Drift.ToImport,
-			ToForget:    p.Drift.ToForget,
-			Summary:     p.Drift.Summary,
-			Error:       p.Error,
+			ProjectName:    p.ProjectName,
+			Path:           p.Path,
+			Workspace:      p.Workspace,
+			HasDrift:       p.Drift.HasDrift,
+			ChangesOutside: p.Drift.ChangesOutside,
+			ToAdd:          p.Drift.ToAdd,
+			ToChange:       p.Drift.ToChange,
+			ToDestroy:      p.Drift.ToDestroy,
+			ToImport:       p.Drift.ToImport,
+			ToForget:       p.Drift.ToForget,
+			Summary:        p.Drift.Summary,
+			Error:          p.Error,
 		})
 	}
 	ref := requestRef
@@ -2287,6 +2291,7 @@ func convertToDriftWebhookResult(dr *models.DriftDetectionResult, requestRef str
 		ref = dr.Projects[0].Ref
 	}
 	return webhooks.DriftResult{
+		AtlantisURL:       atlantisURL,
 		Repository:        dr.Repository,
 		Ref:               ref,
 		DetectionID:       dr.ID,
