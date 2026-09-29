@@ -3870,6 +3870,7 @@ func TestAPIController_DetectDriftSendsWebhookWhenDriftDetected(t *testing.T) {
 	driftStorage := driftmocks.NewMockStorage()
 	When(driftStorage.Store(Any[string](), Any[models.ProjectDrift]())).ThenReturn(nil)
 	ac.DriftStorage = driftStorage
+	ac.AtlantisURL = "https://atlantis.prod.example.com"
 	sender := &recordingDriftSender{}
 	ac.DriftWebhookSender = &webhooks.DriftWebhookSender{Webhooks: []webhooks.DriftSender{sender}}
 
@@ -3887,6 +3888,7 @@ func TestAPIController_DetectDriftSendsWebhookWhenDriftDetected(t *testing.T) {
 	Equals(t, http.StatusOK, w.Code)
 	Equals(t, 1, sender.calls)
 	Equals(t, 1, len(sender.results))
+	Equals(t, "https://atlantis.prod.example.com", sender.results[0].AtlantisURL)
 	Equals(t, "Repo", sender.results[0].Repository)
 	Equals(t, "main", sender.results[0].Ref)
 	Equals(t, 1, sender.results[0].ProjectsWithDrift)
@@ -3894,6 +3896,48 @@ func TestAPIController_DetectDriftSendsWebhookWhenDriftDetected(t *testing.T) {
 	Equals(t, "app", sender.results[0].Projects[0].ProjectName)
 	Equals(t, "app", sender.results[0].Projects[0].Path)
 	Equals(t, events.DefaultWorkspace, sender.results[0].Projects[0].Workspace)
+	Equals(t, "Plan: 1 to add, 0 to change, 0 to destroy.", sender.results[0].Projects[0].Summary)
+	Equals(t, false, sender.results[0].Projects[0].ChangesOutside)
+}
+
+func TestAPIController_DetectDriftWebhookReportsChangesOutside(t *testing.T) {
+	ac, projectCommandBuilder, projectCommandRunner := setup(t)
+	When(projectCommandBuilder.BuildPlanCommands(Any[*command.Context](), Any[*events.CommentCommand]())).
+		ThenReturn([]command.ProjectContext{{
+			CommandName: command.Plan,
+			ProjectName: "app",
+			RepoRelDir:  "app",
+			Workspace:   events.DefaultWorkspace,
+		}}, nil)
+	When(projectCommandRunner.Plan(Any[command.ProjectContext]())).ThenReturn(command.ProjectCommandOutput{
+		PlanSuccess: &models.PlanSuccess{TerraformOutput: "Note: Objects have changed outside of Terraform\n\n" +
+			"  # aws_instance.web has changed\n\nPlan: 0 to add, 1 to change, 0 to destroy."},
+	})
+
+	driftStorage := driftmocks.NewMockStorage()
+	When(driftStorage.Store(Any[string](), Any[models.ProjectDrift]())).ThenReturn(nil)
+	ac.DriftStorage = driftStorage
+	sender := &recordingDriftSender{}
+	ac.DriftWebhookSender = &webhooks.DriftWebhookSender{Webhooks: []webhooks.DriftSender{sender}}
+
+	body, _ := json.Marshal(models.DriftDetectionRequest{
+		Repository: "Repo",
+		Ref:        "main",
+		Type:       "Gitlab",
+		Projects:   []string{"app"},
+	})
+	req, _ := http.NewRequest("POST", "/api/drift/detect", bytes.NewBuffer(body))
+	req.Header.Set(atlantisTokenHeader, atlantisToken)
+	w := httptest.NewRecorder()
+	ac.DetectDrift(w, req)
+
+	Equals(t, http.StatusOK, w.Code)
+	Equals(t, 1, len(sender.results))
+	Equals(t, 1, len(sender.results[0].Projects))
+	project := sender.results[0].Projects[0]
+	Equals(t, true, project.HasDrift)
+	Equals(t, true, project.ChangesOutside)
+	Equals(t, 1, project.ToChange)
 }
 
 func TestAPIController_DetectDrift_IncludesPlanOutput(t *testing.T) {

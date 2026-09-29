@@ -161,6 +161,9 @@ type WebhookConfig struct {
 	// URL is the URL where to deliver this webhook. It only applies to
 	// http webhooks.
 	URL string `mapstructure:"url"`
+	// Template is a Go template that replaces the default message. It only
+	// applies to drift webhooks of kind slack.
+	Template string `mapstructure:"template"`
 }
 
 //go:embed static
@@ -395,6 +398,7 @@ func NewServer(userConfig UserConfig, config Config) (*Server, error) {
 			Kind:           c.Kind,
 			WorkspaceRegex: c.WorkspaceRegex,
 			URL:            c.URL,
+			Template:       c.Template,
 		}
 		webhooksConfig = append(webhooksConfig, config)
 	}
@@ -1101,6 +1105,7 @@ func NewServer(userConfig UserConfig, config Config) (*Server, error) {
 		PullReqStatusFetcher:            pullReqStatusFetcher,
 		PullStatusFetcher:               database,
 		LivePullHeadFetcher:             livePullHeadFetcher,
+		AtlantisURL:                     parsedURL.String(),
 		SilenceVCSStatusNoProjects:      userConfig.SilenceVCSStatusNoProjects,
 	}
 

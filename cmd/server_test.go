@@ -501,6 +501,35 @@ func TestExecute_ConfigFile(t *testing.T) {
 	}
 }
 
+func TestExecute_ConfigFileDriftWebhookTemplate(t *testing.T) {
+	t.Log("A drift webhook template in the config file should be passed to the server.")
+	tmpFile := tempFile(t, `webhooks:
+- event: drift
+  kind: slack
+  channel: drift-alerts
+  template: |
+    *[prod]* drift in {{ .Repository }}
+    {{- range .Projects }}{{ if .HasDrift }}
+    • {{ .ProjectName }}: {{ .Summary }}
+    {{- end }}{{ end }}
+`)
+	defer os.Remove(tmpFile) // nolint: errcheck
+	c := setupWithDefaults(map[string]any{
+		ConfigFlag: tmpFile,
+	}, t)
+	err := c.Execute()
+	Ok(t, err)
+	Equals(t, []server.WebhookConfig{{
+		Event:   "drift",
+		Kind:    "slack",
+		Channel: "drift-alerts",
+		Template: "*[prod]* drift in {{ .Repository }}\n" +
+			"{{- range .Projects }}{{ if .HasDrift }}\n" +
+			"• {{ .ProjectName }}: {{ .Summary }}\n" +
+			"{{- end }}{{ end }}\n",
+	}}, passedConfig.Webhooks)
+}
+
 func TestExecute_EnvironmentVariables(t *testing.T) {
 	t.Log("Environment variables should work.")
 	for flag, value := range testFlags {
