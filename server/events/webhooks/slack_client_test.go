@@ -266,9 +266,9 @@ func TestPostDriftMessage_TemplateError(t *testing.T) {
 	RegisterMockTestingT(t)
 	api := newFakeSlackAPI(t)
 	c := api.client()
-	// Indexing past the projects in a result only fails for some results, so
-	// startup validation can't catch it.
-	tmpl := driftSlackTemplate(t, "{{ (index .Projects 1).ProjectName }}")
+	// Startup validation rejects this template, so build it directly to check
+	// how a runtime rendering error is reported.
+	tmpl := template.Must(template.New("drift").Parse("{{ (index .Projects 1).ProjectName }}"))
 
 	err := c.PostDriftMessage("drift-alerts", webhooks.DriftResult{Repository: "owner/repo"}, tmpl)
 	ErrContains(t, "rendering drift message template", err)

@@ -193,6 +193,33 @@ func TestNewDriftWebhookSender_SlackTemplateErrors(t *testing.T) {
 			template:    "{{ range .Projects }}{{ .Project }}{{ end }}",
 			expErrs:     []string{"rendering a sample drift result: ", "can't evaluate field Project in type webhooks.DriftProjectResult"},
 		},
+		{
+			// Only the no-drift branch runs for a no-drift result.
+			description: "unknown field in no-drift branch",
+			template:    "{{ if .ProjectsWithDrift }}drift{{ else }}{{ .Repo }}{{ end }}",
+			expErrs:     []string{"rendering a sample drift result: ", "can't evaluate field Repo"},
+		},
+		{
+			description: "indexing projects that may be empty",
+			template:    "{{ (index .Projects 0).ProjectName }}",
+			expErrs:     []string{"rendering a sample drift result: ", "index out of range"},
+		},
+		{
+			// These would let a template post server secrets to Slack.
+			description: "environment function",
+			template:    `{{ env "ATLANTIS_GH_TOKEN" }}`,
+			expErrs:     []string{`function "env" not defined`},
+		},
+		{
+			description: "expandenv function",
+			template:    `{{ expandenv "$ATLANTIS_GH_TOKEN" }}`,
+			expErrs:     []string{`function "expandenv" not defined`},
+		},
+		{
+			description: "network function",
+			template:    `{{ getHostByName "example.com" }}`,
+			expErrs:     []string{`function "getHostByName" not defined`},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
