@@ -205,7 +205,7 @@ Por ejemplo, el campo de proyectos con drift contiene líneas como estas:
 
 ### Personalizar el mensaje de drift en Slack
 
-Para reemplazar el mensaje predeterminado, configure `template` en un webhook de drift con `kind: slack`. La plantilla usa la sintaxis de [Go template](https://pkg.go.dev/text/template) con las [funciones de Sprig](https://masterminds.github.io/sprig/), y su resultado se envía como [Slack mrkdwn](https://api.slack.com/reference/surfaces/formatting). El mensaje conserva el color rojo o verde.
+Para reemplazar el mensaje predeterminado, configure `template` en un webhook de drift con `kind: slack`. La plantilla usa la sintaxis de [Go template](https://pkg.go.dev/text/template) con las [funciones de Sprig](https://masterminds.github.io/sprig/), excepto las que leen variables de entorno o resuelven hosts, y su resultado se envía como [Slack mrkdwn](https://api.slack.com/reference/surfaces/formatting). El mensaje conserva el color rojo o verde.
 
 Por ejemplo, esta plantilla etiqueta los mensajes de un Atlantis de producción y omite las ejecuciones de detección que no encontraron drift:
 
@@ -251,7 +251,7 @@ Tenga en cuenta lo siguiente sobre las plantillas:
 
 * Los valores del resultado de la detección se escapan para Slack, por lo que no pueden agregar enlaces ni menciones. El texto de la propia plantilla se envía tal cual, por lo que puede incluir enlaces como `<https://example.com/runbook|runbook>` y menciones como `<!here>`.
 * Si la plantilla solo genera espacios en blanco, no se envía ningún mensaje. El ejemplo anterior usa esto para omitir las ejecuciones de detección sin drift.
-* Atlantis renderiza la plantilla con un resultado de ejemplo al iniciarse, y no se inicia si la plantilla no es válida, por ejemplo porque usa un campo que no existe.
+* Atlantis renderiza la plantilla con resultados de ejemplo, con y sin drift, al iniciarse, y no se inicia si la plantilla no es válida, por ejemplo porque usa un campo que no existe.
 * `template` solo se admite en webhooks de drift con `kind: slack`.
 
 ### HTTP drift webhook payload

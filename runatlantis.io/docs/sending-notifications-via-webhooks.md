@@ -205,7 +205,7 @@ For example, the drifted projects field contains lines like these:
 
 ### Customizing the Slack drift message
 
-To replace the default message, set `template` on a drift webhook of `kind: slack`. The template uses [Go template](https://pkg.go.dev/text/template) syntax with the [Sprig functions](https://masterminds.github.io/sprig/), and its output is sent as [Slack mrkdwn](https://api.slack.com/reference/surfaces/formatting). The message keeps the red or green color.
+To replace the default message, set `template` on a drift webhook of `kind: slack`. The template uses [Go template](https://pkg.go.dev/text/template) syntax with the [Sprig functions](https://masterminds.github.io/sprig/), except those that read environment variables or look up hosts, and its output is sent as [Slack mrkdwn](https://api.slack.com/reference/surfaces/formatting). The message keeps the red or green color.
 
 For example, this template labels messages from a production Atlantis and skips detection runs that found no drift:
 
@@ -251,7 +251,7 @@ Things to know about templates:
 
 * Values from the detection result are escaped for Slack, so they can't add links or mentions. Text in the template itself is sent as is, so it can include links such as `<https://example.com/runbook|runbook>` and mentions such as `<!here>`.
 * If the template renders only whitespace, no message is sent. The example above uses this to skip detection runs without drift.
-* Atlantis renders the template with a sample result when it starts, and doesn't start if the template is invalid, for example because it uses a field that doesn't exist.
+* Atlantis renders the template with sample results, with and without drift, when it starts, and doesn't start if the template is invalid, for example because it uses a field that doesn't exist.
 * `template` is only supported for drift webhooks of `kind: slack`.
 
 ### HTTP drift webhook payload
