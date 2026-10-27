@@ -54,6 +54,9 @@ type Config struct {
 	Kind           string
 	Channel        string
 	URL            string
+	// Template replaces the default message. Only drift webhooks of kind
+	// slack support it.
+	Template string
 }
 
 type Clients struct {
@@ -72,6 +75,9 @@ func NewMultiWebhookSender(configs []Config, clients Clients) (*MultiWebhookSend
 		}
 		if c.Event != ApplyEvent {
 			return nil, fmt.Errorf("\"event: %s\" not supported. Only \"event: %s\" and \"event: %s\" are supported", c.Event, ApplyEvent, DriftEvent)
+		}
+		if c.Template != "" {
+			return nil, fmt.Errorf("\"template\" is only supported for \"event: %s\" webhooks", DriftEvent)
 		}
 		wr, err := regexp.Compile(c.WorkspaceRegex)
 		if err != nil {

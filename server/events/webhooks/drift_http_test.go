@@ -19,12 +19,15 @@ import (
 
 func TestDriftHttpWebhook_Send(t *testing.T) {
 	var receivedBody webhooks.DriftResult
+	var rawBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		Equals(t, "POST", r.Method)
 		Equals(t, "application/json", r.Header.Get("Content-Type"))
 		body, err := io.ReadAll(r.Body)
 		Ok(t, err)
 		err = json.Unmarshal(body, &receivedBody)
+		Ok(t, err)
+		err = json.Unmarshal(body, &rawBody)
 		Ok(t, err)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -43,6 +46,18 @@ func TestDriftHttpWebhook_Send(t *testing.T) {
 	Equals(t, driftResult.ProjectsWithDrift, receivedBody.ProjectsWithDrift)
 	Equals(t, driftResult.TotalProjects, receivedBody.TotalProjects)
 	Equals(t, len(driftResult.Projects), len(receivedBody.Projects))
+
+	// The instance identity and per-project fields are part of the payload
+	// contract, so check them by their JSON keys.
+	Equals(t, "https://atlantis.example.com", rawBody["atlantis_url"])
+	projects, ok := rawBody["projects"].([]any)
+	Assert(t, ok && len(projects) == 2, "expected two projects, got %v", rawBody["projects"])
+	project, ok := projects[0].(map[string]any)
+	Assert(t, ok, "expected a project object, got %T", projects[0])
+	Equals(t, "project1", project["project_name"])
+	Equals(t, "infra/project1", project["path"])
+	Equals(t, "Plan: 1 to add, 2 to change, 0 to destroy.", project["summary"])
+	Equals(t, false, project["changes_outside"])
 }
 
 func TestDriftHttpWebhook_SendWithHeaders(t *testing.T) {

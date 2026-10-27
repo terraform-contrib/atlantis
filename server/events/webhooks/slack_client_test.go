@@ -5,12 +5,17 @@
 package webhooks_test
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"text/template"
 
 	"github.com/runatlantis/atlantis/server/events/models"
 	"github.com/runatlantis/atlantis/server/events/webhooks"
 	"github.com/runatlantis/atlantis/server/events/webhooks/mocks"
+	"github.com/slack-go/slack"
 
 	. "github.com/petergtz/pegomock/v4"
 	. "github.com/runatlantis/atlantis/testing"
@@ -163,4 +168,109 @@ func setup(t *testing.T) {
 		},
 		Success: true,
 	}
+}
+
+// fakeSlackAPI records chat.postMessage requests made by a real slack client.
+type fakeSlackAPI struct {
+	server   *httptest.Server
+	channels []string
+	posted   [][]slack.Attachment
+}
+
+func newFakeSlackAPI(t *testing.T) *fakeSlackAPI {
+	f := &fakeSlackAPI{}
+	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Equals(t, "/chat.postMessage", r.URL.Path)
+		Ok(t, r.ParseForm())
+		var attachments []slack.Attachment
+		Ok(t, json.Unmarshal([]byte(r.PostForm.Get("attachments")), &attachments))
+		f.channels = append(f.channels, r.PostForm.Get("channel"))
+		f.posted = append(f.posted, attachments)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok": true, "channel": "C123", "ts": "1.0"}`))
+	}))
+	t.Cleanup(f.server.Close)
+	return f
+}
+
+func (f *fakeSlackAPI) client() webhooks.DefaultSlackClient {
+	return webhooks.DefaultSlackClient{
+		Slack: slack.New("xoxb-test", slack.OptionAPIURL(f.server.URL+"/")),
+		Token: "xoxb-test",
+	}
+}
+
+func driftSlackTemplate(t *testing.T, text string) *template.Template {
+	t.Helper()
+	slackClient := mocks.NewMockSlackClient()
+	When(slackClient.TokenIsSet()).ThenReturn(true)
+	sender, err := webhooks.NewDriftWebhookSender([]webhooks.Config{{
+		Event:    webhooks.DriftEvent,
+		Kind:     webhooks.SlackKind,
+		Channel:  "drift-alerts",
+		Template: text,
+	}}, webhooks.Clients{Slack: slackClient})
+	Ok(t, err)
+	return sender.Webhooks[0].(*webhooks.DriftSlackWebhook).Template
+}
+
+func TestPostDriftMessage_Default(t *testing.T) {
+	RegisterMockTestingT(t)
+	api := newFakeSlackAPI(t)
+	c := api.client()
+
+	err := c.PostDriftMessage("drift-alerts", driftResult, nil)
+	Ok(t, err)
+	Equals(t, []string{"drift-alerts"}, api.channels)
+	Equals(t, 1, len(api.posted[0]))
+	attachment := api.posted[0][0]
+	Equals(t, "danger", attachment.Color)
+	Equals(t, "Drift detected in owner/repo", attachment.Text)
+	Equals(t, []string{"fields"}, attachment.MarkdownIn)
+	Equals(t, slack.AttachmentField{Title: "Atlantis", Value: "https://atlantis.example.com", Short: true}, attachment.Fields[0])
+	last := attachment.Fields[len(attachment.Fields)-1]
+	Equals(t, slack.AttachmentField{
+		Title: "Drifted projects",
+		Value: "• project: `project1` dir: `infra/project1` workspace: `default` — Plan: 1 to add, 2 to change, 0 to destroy.",
+	}, last)
+}
+
+func TestPostDriftMessage_Template(t *testing.T) {
+	RegisterMockTestingT(t)
+	api := newFakeSlackAPI(t)
+	c := api.client()
+	tmpl := driftSlackTemplate(t, "*[prod]* {{ .ProjectsWithDrift }} drifted in {{ .Repository }}")
+
+	err := c.PostDriftMessage("drift-alerts", driftResult, tmpl)
+	Ok(t, err)
+	Equals(t, [][]slack.Attachment{{{
+		Color:      "danger",
+		Text:       "*[prod]* 1 drifted in owner/repo",
+		MarkdownIn: []string{"text"},
+	}}}, api.posted)
+}
+
+func TestPostDriftMessage_TemplateRendersNothing(t *testing.T) {
+	RegisterMockTestingT(t)
+	api := newFakeSlackAPI(t)
+	c := api.client()
+	tmpl := driftSlackTemplate(t, "{{ if .ProjectsWithDrift }}drift in {{ .Repository }}{{ end }}")
+	noDrift := webhooks.DriftResult{Repository: "owner/repo", Ref: "main", TotalProjects: 2}
+
+	err := c.PostDriftMessage("drift-alerts", noDrift, tmpl)
+	Ok(t, err)
+	Equals(t, 0, len(api.posted))
+}
+
+func TestPostDriftMessage_TemplateError(t *testing.T) {
+	RegisterMockTestingT(t)
+	api := newFakeSlackAPI(t)
+	c := api.client()
+	// Startup validation rejects this template, so build it directly to check
+	// how a runtime rendering error is reported.
+	tmpl := template.Must(template.New("drift").Parse("{{ (index .Projects 1).ProjectName }}"))
+
+	err := c.PostDriftMessage("drift-alerts", webhooks.DriftResult{Repository: "owner/repo"}, tmpl)
+	ErrContains(t, "rendering drift message template", err)
+	Equals(t, 0, len(api.posted))
 }

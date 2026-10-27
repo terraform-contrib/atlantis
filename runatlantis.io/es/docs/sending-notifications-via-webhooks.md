@@ -193,14 +193,74 @@ Cuando la detección de drift se completa correctamente, el mensaje de Slack inc
 
 * **Color**: Rojo si se encontró drift, verde si no hay drift
 * **Text**: "Drift detected in owner/repo" o "No drift in owner/repo"
-* **Fields**: Repositorio, Ref, Proyectos con drift (cantidad), ID de detección
+* **Fields**: Atlantis, Repositorio, Ref, Proyectos con drift (cantidad), ID de detección. El campo Atlantis es el [`--atlantis-url`](server-configuration.md#atlantis-url) del servidor, para que pueda saber qué instancia de Atlantis envió el mensaje.
+* **Drifted projects**: Una línea por cada proyecto con drift, con el nombre del proyecto, el directorio, el workspace y el resumen del plan. Se listan hasta 20 proyectos.
+
+Por ejemplo, el campo de proyectos con drift contiene líneas como estas:
+
+```text
+• project: `vpc` dir: `modules/vpc` workspace: `production` — Plan: 1 to add, 2 to change, 0 to destroy.
+• dir: `modules/iam` workspace: `default` — Note: Objects have changed outside of Terraform. Plan: 0 to add, 1 to change, 0 to destroy.
+```
+
+### Personalizar el mensaje de drift en Slack
+
+Para reemplazar el mensaje predeterminado, configure `template` en un webhook de drift con `kind: slack`. La plantilla usa la sintaxis de [Go template](https://pkg.go.dev/text/template) con las [funciones de Sprig](https://masterminds.github.io/sprig/), excepto las que leen variables de entorno o resuelven hosts, y su resultado se envía como [Slack mrkdwn](https://api.slack.com/reference/surfaces/formatting). El mensaje conserva el color rojo o verde.
+
+Por ejemplo, esta plantilla etiqueta los mensajes de un Atlantis de producción y omite las ejecuciones de detección que no encontraron drift:
+
+```yaml
+webhooks:
+- event: drift
+  kind: slack
+  channel: drift-alerts
+  template: |
+    {{- if .ProjectsWithDrift -}}
+    :rotating_light: *[production]* Drift detected in `{{ .Repository }}` (ref `{{ .Ref }}`) by {{ .AtlantisURL }}
+    {{- range .Projects }}{{ if .HasDrift }}
+    • {{ if .ProjectName }}project: `{{ .ProjectName }}` {{ end }}dir: `{{ .Path }}` workspace: `{{ .Workspace }}` — {{ .Summary }}
+    {{- end }}{{ end }}
+    {{- end -}}
+```
+
+La plantilla se renderiza con estos campos:
+
+| Campo | Descripción |
+| --- | --- |
+| `.AtlantisURL` | URL del servidor de Atlantis que ejecutó la detección ([`--atlantis-url`](server-configuration.md#atlantis-url)) |
+| `.Repository` | Nombre completo del repositorio, por ejemplo `owner/repo` |
+| `.Ref` | Referencia de Git que se comprobó |
+| `.DetectionID` | ID de la ejecución de detección |
+| `.ProjectsWithDrift` | Cantidad de proyectos con drift |
+| `.TotalProjects` | Cantidad de proyectos comprobados |
+| `.Projects` | Los proyectos que se comprobaron |
+
+Cada elemento de `.Projects` tiene estos campos:
+
+| Campo | Descripción |
+| --- | --- |
+| `.ProjectName` | Nombre del proyecto en la configuración del repositorio. Vacío si el proyecto no tiene nombre. |
+| `.Path` | Directorio del proyecto, relativo a la raíz del repositorio |
+| `.Workspace` | Workspace de Terraform |
+| `.HasDrift` | Si el proyecto tiene drift |
+| `.ChangesOutside` | Si Terraform detectó objetos que cambiaron fuera de Terraform |
+| `.ToAdd`, `.ToChange`, `.ToDestroy`, `.ToImport`, `.ToForget` | Cantidades de recursos del plan |
+| `.Summary` | Resumen del plan en una línea, por ejemplo `Plan: 1 to add, 2 to change, 0 to destroy.` |
+
+Tenga en cuenta lo siguiente sobre las plantillas:
+
+* Los valores del resultado de la detección se escapan para Slack, por lo que no pueden agregar enlaces ni menciones. El texto de la propia plantilla se envía tal cual, por lo que puede incluir enlaces como `<https://example.com/runbook|runbook>` y menciones como `<!here>`.
+* Si la plantilla solo genera espacios en blanco, no se envía ningún mensaje. El ejemplo anterior usa esto para omitir las ejecuciones de detección sin drift.
+* Atlantis renderiza la plantilla con resultados de ejemplo, con y sin drift, al iniciarse, y no se inicia si la plantilla no es válida, por ejemplo porque usa un campo que no existe.
+* `template` solo se admite en webhooks de drift con `kind: slack`.
 
 ### HTTP drift webhook payload
 
-El webhook HTTP envía una solicitud POST con el siguiente payload JSON:
+El webhook HTTP envía una solicitud POST con el siguiente payload JSON. `atlantis_url` es el [`--atlantis-url`](server-configuration.md#atlantis-url) del servidor, que identifica la instancia de Atlantis que envió el webhook.
 
 ```json
 {
+  "atlantis_url": "https://atlantis.example.com",
   "repository": "octocat/Hello-World",
   "ref": "main",
   "detection_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -212,6 +272,7 @@ El webhook HTTP envía una solicitud POST con el siguiente payload JSON:
       "path": "modules/vpc",
       "workspace": "production",
       "has_drift": true,
+      "changes_outside": false,
       "to_add": 1,
       "to_change": 2,
       "to_destroy": 0,
@@ -224,6 +285,7 @@ El webhook HTTP envía una solicitud POST con el siguiente payload JSON:
       "path": "modules/ec2",
       "workspace": "production",
       "has_drift": false,
+      "changes_outside": false,
       "to_add": 0,
       "to_change": 0,
       "to_destroy": 0,
